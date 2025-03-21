@@ -60,8 +60,9 @@ pub struct LayoutConstraint {
     pub max_height: f32,
 }
 
+// Custom event type
 #[derive(Debug, Clone)]
-pub enum Event {
+pub enum CustomEvent {
     Click(Point),
     Hover(Point),
     KeyPress(KeyCode),
@@ -79,7 +80,7 @@ pub enum KeyCode {
 
 // Widget trait
 pub trait Widget {
-    fn handle_event(&mut self, event: &Event) -> bool;
+    fn handle_event(&mut self, event: &CustomEvent) -> bool;
     fn update(&mut self, ctx: &mut UpdateContext) -> bool;
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size;
     fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError>;
@@ -138,7 +139,7 @@ impl TextWidget {
 }
 
 impl Widget for TextWidget {
-    fn handle_event(&mut self, _: &Event) -> bool {
+    fn handle_event(&mut self, _: &CustomEvent) -> bool {
         false
     }
 
@@ -190,7 +191,7 @@ impl Heading {
 }
 
 impl Widget for Heading {
-    fn handle_event(&mut self, event: &Event) -> bool {
+    fn handle_event(&mut self, event: &CustomEvent) -> bool {
         self.base.handle_event(event)
     }
 
@@ -223,7 +224,7 @@ impl Subheading {
 }
 
 impl Widget for Subheading {
-    fn handle_event(&mut self, event: &Event) -> bool {
+    fn handle_event(&mut self, event: &CustomEvent) -> bool {
         self.base.handle_event(event)
     }
 
@@ -255,7 +256,7 @@ impl Paragraph {
 }
 
 impl Widget for Paragraph {
-    fn handle_event(&mut self, event: &Event) -> bool {
+    fn handle_event(&mut self, event: &CustomEvent) -> bool {
         self.base.handle_event(event)
     }
 
@@ -289,7 +290,7 @@ impl Container {
 }
 
 impl Widget for Container {
-    fn handle_event(&mut self, event: &Event) -> bool {
+    fn handle_event(&mut self, event: &CustomEvent) -> bool {
         for child in self.children.iter_mut() {
             if child.handle_event(event) {
                 return true;
@@ -335,23 +336,26 @@ impl Widget for Container {
 }
 
 // Glium Renderer implementation
-pub struct GliumRenderer {
-    display: Display,
-    glyph_brush: GlyphBrush,
+pub struct GliumRenderer<'a, T: glium::SurfaceType + glium::ResizeableSurface> {
+    display: glium::Display,
+    glyph_brush: glium_glyph::GlyphBrush<'a, T>,
 }
 
-impl GliumRenderer {
-    pub fn new(display: Display) -> Result<Self, RenderError> {
-        let glyph_brush = GlyphBrushBuilder::using_font(
+impl<'a, T: glium::SurfaceType + glium::ResizeableSurface> GliumRenderer<'a, T> {
+    pub fn new(display: &glium::Display) -> Result<Self, RenderError> {
+        let glyph_brush = glium_glyph::GlyphBrushBuilder::using_font(
             include_str!("../assets/Roboto-Regular.ttf"),
-            &display,
+            display,
         )?;
         
-        Ok(Self { display, glyph_brush })
+        Ok(Self {
+            display: display.clone(),
+            glyph_brush,
+        })
     }
 }
 
-impl Renderer for GliumRenderer {
+impl<'a, T: glium::SurfaceType + glium::ResizeableSurface> Renderer for GliumRenderer<'a, T> {
     fn begin_frame(&mut self) -> Result<(), RenderError> {
         self.display.draw(
             Default::default(),
@@ -365,7 +369,8 @@ impl Renderer for GliumRenderer {
                 self.glyph_brush.draw_queued(
                     target,
                     &self.display,
-                ).unwrap();
+                )?;
+                Ok(())
             },
         )?;
         Ok(())
@@ -397,23 +402,25 @@ impl Renderer for GliumRenderer {
             [color.r as f32 / 255.0, color.g as f32 / 255.0, color.b as f32 / 255.0, color.a as f32 / 255.0],
             font_size,
             alignment,
-        );
+        )?;
         Ok(())
     }
 }
 
 // Main application
 pub fn run_app() -> Result<(), RenderError> {
-    // Initialize window and event loop
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = winit::window::WindowBuilder::new()
         .with_title("Wixe GUI Framework")
         .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0));
     
-    let display = glium::Display::new(window, &event_loop).unwrap();
-    let mut renderer = GliumRenderer::new(display)?;
+    let windowed_context = glium::glutin::ContextBuilder::new()
+        .build_windowed(window, &event_loop)
+        .unwrap();
     
-    // Create UI components
+    let display = unsafe { windowed_context.make_current() };
+    let mut renderer = GliumRenderer::new(&display)?;
+    
     let mut root = Container::new()
         .add_child(Heading::new("Welcome to Wixe".to_string(), 1))
         .add_child(Subheading::new("A modern GUI framework".to_string()))
@@ -421,14 +428,14 @@ pub fn run_app() -> Result<(), RenderError> {
     
     let mut last_frame = Instant::now();
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        *control_flow = winit::event_loop::ControlFlow::Wait;
         
         match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            winit::event::Event::WindowEvent { event, .. } => match event {
+                winit::event::WindowEvent::CloseRequested => *control_flow = winit::event_loop::ControlFlow::Exit,
                 _ => (),
             },
-            Event::MainEventsCleared => {
+            winit::event::Event::MainEventsCleared => {
                 let now = Instant::now();
                 if now.duration_since(last_frame).as_millis() >= 16 {
                     renderer.begin_frame().unwrap();
