@@ -1,155 +1,18 @@
-pub trait Widget {
-    fn handle_event(&mut self, event: &Event) -> bool;
-    fn update(&mut self, ctx: &mut UpdateContext) -> bool;
-    fn layout(&mut self, constraints: &LayoutConstraint) -> Size;
-}
+// Import required crates
+extern crate winit;
+extern crate glium;
+extern crate glium_glyph;
 
-#[derive(Debug, Copy, Clone)]
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
+use std::time::Instant;
+use glium::{Display, Surface};
+use glium_glyph::{GlyphBrush, GlyphBrushBuilder, SectionGeometry};
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 
-#[derive(Debug, Copy, Clone)]
-pub enum KeyCode {
-    Space,
-    Enter,
-    Backspace,
-    Char(char),
-    // Add more key codes as needed
-}
-
-#[derive(Debug, Default)]
-pub struct UpdateContext {}
-
-#[derive(Debug, Default)]
-pub struct LayoutConstraint {
-    pub min_width: f32,
-    pub max_width: f32,
-    pub min_height: f32,
-    pub max_height: f32,
-}
-
-#[derive(Debug, Default)]
-pub struct Size {
-    pub width: f32,
-    pub height: f32,
-}
-
-#[derive(Debug, Clone)]
-pub enum Event {
-    Click(Point),
-    Hover(Point),
-    KeyPress(KeyCode),
-    FocusChange(bool),
-    MouseWheel(f32),
-}
-
-pub struct Button {
-    pub label: String,
-    pub on_click: Option<Box<dyn Fn()>>,
-    pub is_hovered: bool,
-    pub is_pressed: bool,
-}
-
-impl Button {
-    pub fn new(label: String) -> Self {
-        Self {
-            label,
-            on_click: None,
-            is_hovered: false,
-            is_pressed: false,
-        }
-    }
-
-    pub fn with_on_click<F>(mut self, callback: F) -> Self 
-    where F: Fn() + 'static {
-        self.on_click = Some(Box::new(callback));
-        self
-    }
-}
-
-impl Widget for Button {
-    fn handle_event(&mut self, event: &Event) -> bool {
-        match event {
-            Event::Click(_) => {
-                if let Some(on_click) = &self.on_click {
-                    on_click();
-                }
-                true
-            },
-            Event::Hover(_) => {
-                self.is_hovered = true;
-                true
-            },
-            _ => false,
-        }
-    }
-
-    fn update(&mut self, _: &mut UpdateContext) -> bool {
-        false
-    }
-
-    fn layout(&mut self, _: &LayoutConstraint) -> Size {
-        Size {
-            width: 100.0,
-            height: 30.0,
-        }
-    }
-}
-
-pub struct Container {
-    pub children: Vec<Box<dyn Widget>>,
-}
-
-impl Container {
-    pub fn new() -> Self {
-        Self { children: Vec::new() }
-    }
-
-    pub fn add_child(mut self, child: impl Widget + 'static) -> Self {
-        self.children.push(Box::new(child));
-        self
-    }
-}
-
-impl Widget for Container {
-    fn handle_event(&mut self, event: &Event) -> bool {
-        for child in self.children.iter_mut() {
-            if child.handle_event(event) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn update(&mut self, ctx: &mut UpdateContext) -> bool {
-        let mut updated = false;
-        for child in self.children.iter_mut() {
-            if child.update(ctx) {
-                updated = true;
-            }
-        }
-        updated
-    }
-
-    fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
-        let mut total_height = 0.0;
-        let mut max_width = 0.0_f32;  // Specify f32 type explicitly
-        
-        for child in self.children.iter_mut() {
-            let child_size = child.layout(constraints);
-            total_height += child_size.height;
-            max_width = max_width.max(child_size.width);
-        }
-        
-        Size {
-            width: max_width,
-            height: total_height,
-        }
-    }
-}
-
+// Core types
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextAlignment {
     Left,
@@ -177,7 +40,70 @@ impl Default for Color {
     }
 }
 
-// Base text widget
+#[derive(Debug, Copy, Clone)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Size {
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Default)]
+pub struct LayoutConstraint {
+    pub min_width: f32,
+    pub max_width: f32,
+    pub min_height: f32,
+    pub max_height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub enum Event {
+    Click(Point),
+    Hover(Point),
+    KeyPress(KeyCode),
+    FocusChange(bool),
+    MouseWheel(f64),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum KeyCode {
+    Space,
+    Enter,
+    Backspace,
+    Char(char),
+}
+
+// Widget trait
+pub trait Widget {
+    fn handle_event(&mut self, event: &Event) -> bool;
+    fn update(&mut self, ctx: &mut UpdateContext) -> bool;
+    fn layout(&mut self, constraints: &LayoutConstraint) -> Size;
+    fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError>;
+}
+
+// Update context
+#[derive(Debug, Default)]
+pub struct UpdateContext {}
+
+// Renderer trait
+#[derive(Debug)]
+pub enum RenderError {
+    GraphicsError(String),
+    WindowError(String),
+}
+
+pub trait Renderer {
+    fn begin_frame(&mut self) -> Result<(), RenderError>;
+    fn end_frame(&mut self) -> Result<(), RenderError>;
+    fn clear(&mut self, color: Color);
+    fn draw_text(&mut self, text: &str, position: Point, font_size: f32, color: Color, alignment: TextAlignment) -> Result<(), RenderError>;
+}
+
+// Text widget
 pub struct TextWidget {
     pub text: String,
     pub font_size: f32,
@@ -221,11 +147,20 @@ impl Widget for TextWidget {
     }
 
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
-        // For now, return a fixed size based on font size
         Size {
-            width: self.font_size * 10.0, // Rough estimate
-            height: self.font_size * 1.2, // Rough estimate
+            width: self.font_size * 10.0,
+            height: self.font_size * 1.2,
         }
+    }
+
+    fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError> {
+        renderer.draw_text(
+            &self.text,
+            position,
+            self.font_size,
+            self.color,
+            self.alignment,
+        )
     }
 }
 
@@ -266,6 +201,10 @@ impl Widget for Heading {
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
         self.base.layout(constraints)
     }
+
+    fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError> {
+        self.base.render(renderer, position)
+    }
 }
 
 // Subheading widget
@@ -295,6 +234,10 @@ impl Widget for Subheading {
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
         self.base.layout(constraints)
     }
+
+    fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError> {
+        self.base.render(renderer, position)
+    }
 }
 
 // Paragraph widget
@@ -323,13 +266,186 @@ impl Widget for Paragraph {
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
         self.base.layout(constraints)
     }
+
+    fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError> {
+        self.base.render(renderer, position)
+    }
 }
 
-// Example usage
-fn main() {
-    let heading = Heading::new("Main Title".to_string(), 1);
-    let subheading = Subheading::new("Sub Title".to_string());
-    let paragraph = Paragraph::new("This is a paragraph of text that will be justified.".to_string());
+// Container widget
+pub struct Container {
+    pub children: Vec<Box<dyn Widget>>,
+}
+
+impl Container {
+    pub fn new() -> Self {
+        Self { children: Vec::new() }
+    }
+
+    pub fn add_child(mut self, child: impl Widget + 'static) -> Self {
+        self.children.push(Box::new(child));
+        self
+    }
+}
+
+impl Widget for Container {
+    fn handle_event(&mut self, event: &Event) -> bool {
+        for child in self.children.iter_mut() {
+            if child.handle_event(event) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn update(&mut self, ctx: &mut UpdateContext) -> bool {
+        let mut updated = false;
+        for child in self.children.iter_mut() {
+            if child.update(ctx) {
+                updated = true;
+            }
+        }
+        updated
+    }
+
+    fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
+        let mut total_height = 0.0;
+        let mut max_width = 0.0;
+        
+        for child in self.children.iter_mut() {
+            let child_size = child.layout(constraints);
+            total_height += child_size.height;
+            max_width = max_width.max(child_size.width);
+        }
+        
+        Size {
+            width: max_width,
+            height: total_height,
+        }
+    }
+
+    fn render(&mut self, renderer: &mut dyn Renderer, position: Point) -> Result<(), RenderError> {
+        let mut current_pos = position;
+        for child in self.children.iter_mut() {
+            child.render(renderer, current_pos)?;
+            current_pos.y += child.layout(&LayoutConstraint::default()).height;
+        }
+        Ok(())
+    }
+}
+
+// Glium Renderer implementation
+pub struct GliumRenderer {
+    display: Display,
+    glyph_brush: GlyphBrush,
+}
+
+impl GliumRenderer {
+    pub fn new(display: Display) -> Result<Self, RenderError> {
+        let glyph_brush = GlyphBrushBuilder::using_font(
+            include_str!("../assets/Roboto-Regular.ttf"),
+            &display,
+        )?;
+        
+        Ok(Self { display, glyph_brush })
+    }
+}
+
+impl Renderer for GliumRenderer {
+    fn begin_frame(&mut self) -> Result<(), RenderError> {
+        self.display.draw(
+            Default::default(),
+            |target| {
+                target.clear(Some([
+                    240.0 / 255.0,
+                    240.0 / 255.0,
+                    240.0 / 255.0,
+                    1.0,
+                ]));
+                self.glyph_brush.draw_queued(
+                    target,
+                    &self.display,
+                ).unwrap();
+            },
+        )?;
+        Ok(())
+    }
+
+    fn end_frame(&mut self) -> Result<(), RenderError> {
+        self.display.swap_buffers()?;
+        Ok(())
+    }
+
+    fn clear(&mut self, color: Color) {
+        self.display.draw(Default::default(), |target| {
+            target.clear(Some([
+                color.r as f32 / 255.0,
+                color.g as f32 / 255.0,
+                color.b as f32 / 255.0,
+                color.a as f32 / 255.0,
+            ]));
+        }).unwrap();
+    }
+
+    fn draw_text(&mut self, text: &str, position: Point, font_size: f32, color: Color, alignment: TextAlignment) -> Result<(), RenderError> {
+        self.glyph_brush.queue_text(
+            text,
+            Point {
+                x: position.x,
+                y: position.y,
+            },
+            [color.r as f32 / 255.0, color.g as f32 / 255.0, color.b as f32 / 255.0, color.a as f32 / 255.0],
+            font_size,
+            alignment,
+        );
+        Ok(())
+    }
+}
+
+// Main application
+pub fn run_app() -> Result<(), RenderError> {
+    // Initialize window and event loop
+    let event_loop = EventLoop::new();
+    let window = WindowBuilder::new()
+        .with_title("Wixe GUI Framework")
+        .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0));
     
-    println!("Created text widgets successfully!");
+    let display = glium::Display::new(window, &event_loop).unwrap();
+    let mut renderer = GliumRenderer::new(display)?;
+    
+    // Create UI components
+    let mut root = Container::new()
+        .add_child(Heading::new("Welcome to Wixe".to_string(), 1))
+        .add_child(Subheading::new("A modern GUI framework".to_string()))
+        .add_child(Paragraph::new("This is a paragraph of text rendered by Wixe.".to_string()));
+    
+    let mut last_frame = Instant::now();
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        
+        match event {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                _ => (),
+            },
+            Event::MainEventsCleared => {
+                let now = Instant::now();
+                if now.duration_since(last_frame).as_millis() >= 16 {
+                    renderer.begin_frame().unwrap();
+                    
+                    root.render(&mut renderer, Point { x: 20.0, y: 20.0 }).unwrap();
+                    
+                    renderer.end_frame().unwrap();
+                    last_frame = now;
+                }
+            }
+            _ => (),
+        }
+    });
+}
+
+fn main() {
+    if let Err(e) = run_app() {
+        eprintln!("Error running app: {:?}", e);
+    }
 }
