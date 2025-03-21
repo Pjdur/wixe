@@ -1,36 +1,50 @@
-// Core trait for all widgets
 pub trait Widget {
     fn handle_event(&mut self, event: &Event) -> bool;
     fn update(&mut self, ctx: &mut UpdateContext) -> bool;
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size;
 }
 
-// Basic event system
+#[derive(Debug, Copy, Clone)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum KeyCode {
+    Space,
+    Enter,
+    Backspace,
+    Char(char),
+    // Add more key codes as needed
+}
+
+#[derive(Debug, Default)]
+pub struct UpdateContext {}
+
+#[derive(Debug, Default)]
+pub struct LayoutConstraint {
+    pub min_width: f32,
+    pub max_width: f32,
+    pub min_height: f32,
+    pub max_height: f32,
+}
+
+#[derive(Debug, Default)]
+pub struct Size {
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Debug, Clone)]
 pub enum Event {
     Click(Point),
     Hover(Point),
     KeyPress(KeyCode),
     FocusChange(bool),
-    MouseWheel(f64),
+    MouseWheel(f32),
 }
 
-// Layout constraint system
-#[derive(Debug, Default)]
-pub struct LayoutConstraint {
-    pub min_width: f64,
-    pub max_width: f64,
-    pub min_height: f64,
-    pub max_height: f64,
-}
-
-#[derive(Debug, Default)]
-pub struct Size {
-    pub width: f64,
-    pub height: f64,
-}
-
-// Button widget implementation
 pub struct Button {
     pub label: String,
     pub on_click: Option<Box<dyn Fn()>>,
@@ -68,7 +82,6 @@ impl Widget for Button {
                 self.is_hovered = true;
                 true
             },
-            Event::MouseWheel(_) => false,
             _ => false,
         }
     }
@@ -78,7 +91,6 @@ impl Widget for Button {
     }
 
     fn layout(&mut self, _: &LayoutConstraint) -> Size {
-        // Default button size for now
         Size {
             width: 100.0,
             height: 30.0,
@@ -86,7 +98,6 @@ impl Widget for Button {
     }
 }
 
-// Container widget for holding other widgets
 pub struct Container {
     pub children: Vec<Box<dyn Widget>>,
 }
@@ -123,9 +134,8 @@ impl Widget for Container {
     }
 
     fn layout(&mut self, constraints: &LayoutConstraint) -> Size {
-        // Simple vertical layout for now
         let mut total_height = 0.0;
-        let mut max_width = 0.0;
+        let mut max_width = 0.0_f32;  // Specify f32 type explicitly
         
         for child in self.children.iter_mut() {
             let child_size = child.layout(constraints);
@@ -140,11 +150,10 @@ impl Widget for Container {
     }
 }
 
-// Example usage
 fn main() {
     let button = Button::new("Click me".to_string())
         .with_on_click(|| println!("Button clicked!"));
-        
+    
     let container = Container::new()
         .add_child(button);
 }
